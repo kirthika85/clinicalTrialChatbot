@@ -5,21 +5,14 @@ from openai import OpenAI
 import time
 import re
 
-try:
-    from transformers import pipeline
-    import torch
-except ImportError as e:
-    st.error(f"Missing dependencies: {e}. Please install the required libraries with 'pip install transformers torch'")
-    st.stop()
-
 # Set up OpenAI API using environment variable
-with st.spinner("🔄 Payer agent Authentication In progress..."):
+with st.spinner("🔄 MoolAI agent Authentication In progress..."):
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         st.error("❌ API_KEY not found in environment variables.")
         st.stop()
     time.sleep(5)
-st.success("✅ Payer agent Authentication Successful")
+st.success("✅ MoolAI agent Authentication Successful")
 
 if api_key is None:
     st.error("OPENAI_API_KEY environment variable is not set. Please set it before running the app.")
@@ -27,17 +20,6 @@ if api_key is None:
 
 # Initialize OpenAI client
 client = OpenAI(api_key=api_key)
-
-# Initialize Hugging Face pipeline for text classification
-@st.cache_resource # prevents the model from being loaded multiple times.
-def load_model():
-    try:
-        return pipeline("text-classification", model="bert-base-uncased", device=0 if torch.cuda.is_available() else -1)
-    except Exception as e:
-        st.error(f"Error loading model: {e}. Please make sure you have the correct dependencies installed (TensorFlow or PyTorch).")
-        st.stop()
-
-classifier = load_model()
 
 # Function to read the CSV files and create the DataFrames
 def create_dataframes():
