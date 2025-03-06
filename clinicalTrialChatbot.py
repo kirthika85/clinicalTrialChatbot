@@ -1,9 +1,15 @@
 import streamlit as st
 import pandas as pd
 import os
-import openai
+from openai import OpenAI
 import time
-from transformers import pipeline
+
+try:
+    from transformers import pipeline
+    import torch
+except ImportError as e:
+    st.error(f"Missing dependencies: {e}. Please install the required libraries with 'pip install transformers torch'")
+    st.stop()
 
 # Set up OpenAI API using environment variable
 with st.spinner("🔄 Payer agent Authentication In progress..."):
@@ -24,7 +30,11 @@ client = openai.OpenAI(api_key=api_key)
 # Initialize Hugging Face pipeline for text classification
 @st.cache_resource # prevents the model from being loaded multiple times.
 def load_model():
-    return pipeline("text-classification", model="bert-base-uncased")
+    try:
+        return pipeline("text-classification", model="bert-base-uncased", device=0 if torch.cuda.is_available() else -1)
+    except Exception as e:
+        st.error(f"Error loading model: {e}. Please make sure you have the correct dependencies installed (TensorFlow or PyTorch).")
+        st.stop()
 
 classifier = load_model()
 
@@ -189,45 +199,7 @@ def generate_response(filtered_data, adverse_event, age):
     else:
         return "There are no patients matching the specified criteria."
 
-# Streamlit App Layout
-st.title("Clinical Trial Data Analyzer")
-
-# Create the DataFrames
-joined_df = create_dataframes()
-
-if joined_df is not None:
-    st.write("### Joined DataFrame (Sample):")
-    st.dataframe(joined_df.head(10))
-
-    # User Input
-    user_input = st.text_input("Ask a question about the data:")
-    
-    if st.button("Get Answer"):
-        if user_input:
-            with st.spinner("Processing your query..."):
-                # Process the user query and filter the DataFrame
-                filtered_data = process_query(joined_df, user_input)
-
-                if not filtered_data.empty:
-                    # Extract criteria from the processed query
-                    adverse_event = extract_adverse_event(user_input)
-                    age = extract_age(user_input)
-
-                    count = len(filtered_data)
-                    st.write(f"### Number of matching patients: {count}")
-                    st.write("### Matching Patient Records:")
-                    st.dataframe(filtered_data)
-
-                    # Generate response using OpenAI for additional context or explanation
-                    response = generate_response(filtered_data, adverse_event, age)
-                    st.write("### Answer:")
-                    st.write(response)
-                else:
-                    st.write("No matching records found for your query.")
-                    
-else:
-    st.error("Failed to load data. Please check if 'ae - ae.csv' and 'dm - dm.csv' are present in the project folder.")
-
+# Function to extract adverse event
 def extract_adverse_event(user_question):
     """
     Extracts the adverse event from the user's question using OpenAI.
@@ -269,6 +241,7 @@ def extract_adverse_event(user_question):
         st.error(f"Error extracting adverse event: {e}")
         return None
 
+# Function to extract age
 def extract_age(user_question):
     """
     Extracts the age from the user's question using OpenAI.
@@ -314,3 +287,42 @@ def extract_age(user_question):
     except Exception as e:
         st.error(f"Error extracting age: {e}")
         return None
+
+# Streamlit App Layout
+st.title("Clinical Trial Data Analyzer")
+
+# Create the DataFrames
+joined_df = create_dataframes()
+
+if joined_df is not None:
+    st.write("### Joined DataFrame (Sample):")
+    st.dataframe(joined_df.head(10))
+
+    # User Input
+    user_input = st.text_input("Ask a question about the data:")
+    
+    if st.button("Get Answer"):
+        if user_input:
+            with st.spinner("Processing your query..."):
+                # Process the user query and filter the DataFrame
+                filtered_data = process_query(joined_df, user_input)
+
+                if not filtered_data.empty:
+                    # Extract criteria from the processed query
+                    adverse_event = extract_adverse_event(user_input)
+                    age = extract_age(user_input)
+
+                    count = len(filtered_data)
+                    st.write(f"### Number of matching patients: {count}")
+                    st.write("### Matching Patient Records:")
+                    st.dataframe(filtered_data)
+
+                    # Generate response using OpenAI for additional context or explanation
+                    response = generate_response(filtered_data, adverse_event, age)
+                    st.write("### Answer:")
+                    st.write(response)
+                else:
+                    st.write("No matching records found for your query.")
+                    
+else:
+    st.error("Failed to load data. Please check if 'ae - ae.csv' and 'dm - dm.csv' are present in the project folder.")
