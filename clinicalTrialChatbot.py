@@ -1,8 +1,14 @@
 import streamlit as st
 import pandas as pd
 import os
-from openai import OpenAI
 import time
+
+try:
+    import openai
+    from openai import OpenAI
+except ImportError as e:
+    st.error(f"OpenAI library is not installed. Please include 'openai' in your requirements.txt file. Error: {e}")
+    st.stop()
 
 try:
     from transformers import pipeline
@@ -25,7 +31,11 @@ if api_key is None:
     st.stop()
 
 # Initialize OpenAI client
-client = openai.OpenAI(api_key=api_key)
+try:
+    client = OpenAI(api_key=api_key)
+except Exception as e:
+    st.error(f"Error initializing OpenAI client: {e}. Please check your OpenAI API key and ensure it is valid.")
+    st.stop()
 
 # Initialize Hugging Face pipeline for text classification
 @st.cache_resource # prevents the model from being loaded multiple times.
