@@ -2,3 +2,9 @@ streamlit
 openai
 pandas
 transformers
+torch
+protobuf
+accelerate
+Pillow
+requests
+sentencepiece
