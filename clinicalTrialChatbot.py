@@ -1,14 +1,9 @@
 import streamlit as st
 import pandas as pd
 import os
+from openai import OpenAI
 import time
-
-try:
-    import openai
-    from openai import OpenAI
-except ImportError as e:
-    st.error(f"OpenAI library is not installed. Please include 'openai' in your requirements.txt file. Error: {e}")
-    st.stop()
+import re
 
 try:
     from transformers import pipeline
@@ -31,11 +26,7 @@ if api_key is None:
     st.stop()
 
 # Initialize OpenAI client
-try:
-    client = OpenAI(api_key=api_key)
-except Exception as e:
-    st.error(f"Error initializing OpenAI client: {e}. Please check your OpenAI API key and ensure it is valid.")
-    st.stop()
+client = OpenAI(api_key=api_key)
 
 # Initialize Hugging Face pipeline for text classification
 @st.cache_resource # prevents the model from being loaded multiple times.
@@ -71,232 +62,89 @@ def create_dataframes():
         st.error(f"Error reading or processing the CSV files: {e}")
         return None
 
-# Function to extract information and filter data based on user query
-def process_query(dataframe, user_question):
+# Function to convert natural language to pandas query string
+def generate_pandas_query(user_question):
     """
-    Analyzes the user query and filters the DataFrame based on extracted information.
+    Converts natural language into a pandas query string.
+    Args:
+        user_question (str): The user's question in natural language.
+    Returns:
+        str: A pandas query string.
+    """
+    try:
+        # Use OpenAI to convert natural language into a pandas query string
+        prompt = f"""
+        You are an expert in converting natural language questions into pandas query strings.
+        Your task is to convert the user's question into a pandas query string that can be used to filter a DataFrame.
+        Here are some examples:
 
+        User Question: How many patients are with adverse events DIARRHOEA and age above 75?
+        Pandas Query: AETERM == 'DIARRHOEA' and AGE > 75
+
+        User Question: How many patients are with adverse events APPLICATION SITE ERYTHEMA and WHITE race?
+        Pandas Query: AETERM == 'APPLICATION SITE ERYTHEMA' and RACE == 'WHITE'
+
+        User Question: How many male patients are older than 80 with fatigue?
+        Pandas Query: SEX == 'M' and AGE > 80 and AETERM == 'FATIGUE'
+
+        User Question: How many patients are older than 60 who are BLACK OR AFRICAN AMERICAN?
+        Pandas Query: AGE > 60 and RACE == 'BLACK OR AFRICAN AMERICAN'
+
+        User Question: How many patients are there?
+        Pandas Query: None
+
+        Now, convert this question:
+        {user_question}
+        Pandas Query:
+        """
+
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are an expert at converting natural language questions into pandas query strings."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.0
+        )
+        query = response.choices[0].message.content.strip()
+
+        return query
+
+    except Exception as e:
+        st.error(f"Error generating pandas query: {e}")
+        return None
+
+# Function to filter the DataFrame based on the generated query
+def filter_data(dataframe, query):
+    """
+    Filters the DataFrame based on the generated query.
     Args:
         dataframe (pd.DataFrame): The joined DataFrame.
-        user_question (str): The user's question.
-
+        query (str): The pandas query string.
     Returns:
         pd.DataFrame: The filtered DataFrame.
     """
     try:
-        # Use OpenAI to extract relevant information from the query
-        prompt = f"""
-        You are an expert in analyzing clinical trial data.
-        The user will ask a question about the data.
-        Your task is to extract the following information from the question:
-        1.  The adverse event (AETERM). If no adverse event is mentioned, set to None.
-        2.  The minimum age required (AGE) in integer format. If no age is mentioned, set to None.
-
-        Here are some examples:
-        User Question: How many patients are with adverse event APPLICATION SITE ERYTHEMA who are older than 75?
-        Adverse Event: APPLICATION SITE ERYTHEMA
-        Age: 75
-
-        User Question: How many patients are older than 80?
-        Adverse Event: None
-        Age: 80
-
-        User Question: How many patients are with adverse event Diarrhea?
-        Adverse Event: Diarrhea
-        Age: None
-
-        User Question: How many patients are there?
-        Adverse Event: None
-        Age: None
-
-        Now, extract the information from this question:
-        {user_question}
-
-        Adverse Event:
-        """
-
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are an expert at extracting information from clinical trial data questions."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.0
-        )
-
-        adverse_event = response.choices[0].message.content.strip()
-
-        prompt = f"""
-        You are an expert in analyzing clinical trial data.
-        The user will ask a question about the data.
-        Your task is to extract the following information from the question:
-        1.  The adverse event (AETERM). If no adverse event is mentioned, set to None.
-        2.  The minimum age required (AGE) in integer format. If no age is mentioned, set to None.
-
-        Here are some examples:
-        User Question: How many patients are with adverse event APPLICATION SITE ERYTHEMA who are older than 75?
-        Adverse Event: APPLICATION SITE ERYTHEMA
-        Age: 75
-
-        User Question: How many patients are older than 80?
-        Adverse Event: None
-        Age: 80
-
-        User Question: How many patients are with adverse event Diarrhea?
-        Adverse Event: Diarrhea
-        Age: None
-
-        User Question: How many patients are there?
-        Adverse Event: None
-        Age: None
-
-        Now, extract the information from this question:
-        {user_question}
-
-        Age:
-        """
-
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are an expert at extracting information from clinical trial data questions."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.0
-        )
-        age_str = response.choices[0].message.content.strip()
-
-        age = None
-        if age_str.isdigit():
-            age = int(age_str)
-
-        # Filter the DataFrame based on extracted information
-        filtered_df = dataframe.copy() # Create a copy to avoid modifying the original DataFrame
-
-        if adverse_event and adverse_event != "None":
-            filtered_df = filtered_df[filtered_df['AETERM'] == adverse_event]
-        if age is not None:
-            filtered_df = filtered_df[filtered_df['AGE'] > age]
-
-        return filtered_df
-
+        if query and query.lower() != 'none':
+            filtered_df = dataframe.query(query)
+            return filtered_df
+        else:
+            return dataframe  # If query is None, return the original DataFrame
     except Exception as e:
-        st.error(f"Error processing query: {e}")
-        return pd.DataFrame()  # Return an empty DataFrame in case of error
+        st.error(f"Error filtering data: {e}")
+        return pd.DataFrame()
 
 # Function to generate a response using OpenAI
-def generate_response(filtered_data, adverse_event, age):
+def generate_response(filtered_data):
     """
     Generates a deterministic response to the user's input using OpenAI, based on filtered data.
-
     Args:
         filtered_data (pd.DataFrame): The filtered DataFrame.
-        adverse_event (str): The adverse event extracted from the query.
-        age (int): The age extracted from the query.
-
     Returns:
         str: The generated response.
     """
     count = len(filtered_data)
-    if count > 0:
-        response_str = f"There are {count} patients"
-        if adverse_event and adverse_event != "None":
-            response_str += f" with adverse event {adverse_event}"
-        if age is not None:
-            response_str += f" who are older than {age}"
-        response_str += "."
-        return response_str
-    else:
-        return "There are no patients matching the specified criteria."
-
-# Function to extract adverse event
-def extract_adverse_event(user_question):
-    """
-    Extracts the adverse event from the user's question using OpenAI.
-
-    Args:
-        user_question (str): The user's question.
-
-    Returns:
-        str: The adverse event extracted from the query.
-    """
-    try:
-        prompt = f"""
-        You are an expert in analyzing clinical trial data.
-        The user will ask a question about the data.
-        Your task is to extract the adverse event (AETERM) from the question.
-        If no adverse event is mentioned, respond with "None".
-
-        Here are some examples:
-        User Question: How many patients are with adverse event APPLICATION SITE ERYTHEMA who are older than 75?
-        Adverse Event: APPLICATION SITE ERYTHEMA
-
-        User Question: How many patients are older than 80?
-        Adverse Event: None
-
-        Now, extract the adverse event from this question:
-        {user_question}
-        """
-
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are an expert at extracting information from clinical trial data questions."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.0
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        st.error(f"Error extracting adverse event: {e}")
-        return None
-
-# Function to extract age
-def extract_age(user_question):
-    """
-    Extracts the age from the user's question using OpenAI.
-
-    Args:
-        user_question (str): The user's question.
-
-    Returns:
-        int: The age extracted from the query.
-    """
-    try:
-        prompt = f"""
-        You are an expert in analyzing clinical trial data.
-        The user will ask a question about the data.
-        Your task is to extract the minimum age required (AGE) in integer format from the question.
-        If no age is mentioned, respond with "None".
-
-        Here are some examples:
-        User Question: How many patients are with adverse event APPLICATION SITE ERYTHEMA who are older than 75?
-        Age: 75
-
-        User Question: How many patients are older than 80?
-        Age: 80
-
-        Now, extract the age from this question:
-        {user_question}
-        """
-
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are an expert at extracting information from clinical trial data questions."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.0
-        )
-        age_str = response.choices[0].message.content.strip()
-
-        if age_str.isdigit():
-            return int(age_str)
-        else:
-            return None
-    except Exception as e:
-        st.error(f"Error extracting age: {e}")
-        return None
+    return f"There are {count} patients matching the specified criteria." if count > 0 else "There are no patients matching the specified criteria."
 
 # Streamlit App Layout
 st.title("Clinical Trial Data Analyzer")
@@ -314,25 +162,29 @@ if joined_df is not None:
     if st.button("Get Answer"):
         if user_input:
             with st.spinner("Processing your query..."):
-                # Process the user query and filter the DataFrame
-                filtered_data = process_query(joined_df, user_input)
+                # Generate pandas query
+                pandas_query = generate_pandas_query(user_input)
 
-                if not filtered_data.empty:
-                    # Extract criteria from the processed query
-                    adverse_event = extract_adverse_event(user_input)
-                    age = extract_age(user_input)
+                if pandas_query is not None:
+                    st.write(f"Pandas Query: {pandas_query}")
 
-                    count = len(filtered_data)
-                    st.write(f"### Number of matching patients: {count}")
-                    st.write("### Matching Patient Records:")
-                    st.dataframe(filtered_data)
+                    # Filter the DataFrame
+                    filtered_data = filter_data(joined_df, pandas_query)
 
-                    # Generate response using OpenAI for additional context or explanation
-                    response = generate_response(filtered_data, adverse_event, age)
-                    st.write("### Answer:")
-                    st.write(response)
+                    if not filtered_data.empty:
+                        count = len(filtered_data)
+                        st.write(f"### Number of matching patients: {count}")
+                        st.write("### Matching Patient Records:")
+                        st.dataframe(filtered_data)
+
+                        # Generate response using OpenAI for additional context or explanation
+                        response = generate_response(filtered_data)
+                        st.write("### Answer:")
+                        st.write(response)
+                    else:
+                        st.write("No matching records found for your query.")
                 else:
-                    st.write("No matching records found for your query.")
+                    st.error("Failed to generate a valid query.")
                     
 else:
     st.error("Failed to load data. Please check if 'ae - ae.csv' and 'dm - dm.csv' are present in the project folder.")
