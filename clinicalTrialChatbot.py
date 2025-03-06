@@ -26,8 +26,8 @@ def create_dataframes():
         pandas.DataFrame: The joined DataFrame.
     """
     try:
-        ae_df = pd.read_csv('ae.csv')
-        dm_df = pd.read_csv('dm.csv')
+        ae_df = pd.read_csv('ae - ae.csv')
+        dm_df = pd.read_csv('dm - dm.csv')
 
         # Join the DataFrames using USUBJID
         joined_df = pd.merge(ae_df, dm_df, on='USUBJID', how='inner')  # Inner join to match patients in both datasets
