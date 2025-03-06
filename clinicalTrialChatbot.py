@@ -69,7 +69,8 @@ def generate_response(user_input, dataframe):
         """
 
         # Call OpenAI's ChatCompletion API
-        response = openai.ChatCompletion.create(
+        client = openai.OpenAI()  # Instantiate the OpenAI client
+        response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": "You are a clinical trial data expert focused on deterministic answers."},
